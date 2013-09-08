@@ -1,5 +1,5 @@
 {
-  "name": "escodegen",
+  "name": "escodegen-evanw",
   "description": "ECMAScript code generator",
   "homepage": "http://github.com/Constellation/escodegen.html",
   "main": "escodegen.js",

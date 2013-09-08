@@ -343,12 +343,12 @@
             }
         }
 
-        var map = new SourceMapGenerator(options);
-        var code = '';
-        var previousLine = 0;
-        var previousColumn = 0;
-        var generatedLine = 1;
-        var generatedColumn = 0;
+        var map = new SourceMapGenerator(options),
+            code = '',
+            previousLine = 0,
+            previousColumn = 0,
+            generatedLine = 1,
+            generatedColumn = 0;
         visit(this);
         return { code: code, map: map };
     };
