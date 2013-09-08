@@ -39,7 +39,7 @@
         Precedence,
         BinaryPrecedence,
         Regex,
-        SourceNode,
+        SourceMapGenerator,
         estraverse,
         isArray,
         base,
@@ -233,8 +233,8 @@
         };
     }
 
-    // Fallback for the non SourceMap environment
-    function SourceNodeMock(line, column, filename, chunk) {
+    // Similar to SourceNode except tracks mappings for both loc.start and loc.end
+    function CustomSourceNode(loc, chunk, name) {
         var result = [];
 
         function flatten(input) {
@@ -243,7 +243,7 @@
                 for (i = 0, iz = input.length; i < iz; ++i) {
                     flatten(input[i]);
                 }
-            } else if (input instanceof SourceNodeMock) {
+            } else if (input instanceof CustomSourceNode) {
                 result.push(input);
             } else if (typeof input === 'string' && input) {
                 result.push(input);
@@ -251,14 +251,17 @@
         }
 
         flatten(chunk);
+
+        this.loc = loc;
+        this.name = name;
         this.children = result;
     }
 
-    SourceNodeMock.prototype.toString = function toString() {
+    CustomSourceNode.prototype.toString = function toString() {
         var res = '', i, iz, node;
         for (i = 0, iz = this.children.length; i < iz; ++i) {
             node = this.children[i];
-            if (node instanceof SourceNodeMock) {
+            if (node instanceof CustomSourceNode) {
                 res += node.toString();
             } else {
                 res += node;
@@ -267,9 +270,9 @@
         return res;
     };
 
-    SourceNodeMock.prototype.replaceRight = function replaceRight(pattern, replacement) {
+    CustomSourceNode.prototype.replaceRight = function replaceRight(pattern, replacement) {
         var last = this.children[this.children.length - 1];
-        if (last instanceof SourceNodeMock) {
+        if (last instanceof CustomSourceNode) {
             last.replaceRight(pattern, replacement);
         } else if (typeof last === 'string') {
             this.children[this.children.length - 1] = last.replace(pattern, replacement);
@@ -279,7 +282,7 @@
         return this;
     };
 
-    SourceNodeMock.prototype.join = function join(sep) {
+    CustomSourceNode.prototype.join = function join(sep) {
         var i, iz, result;
         result = [];
         iz = this.children.length;
@@ -291,6 +294,63 @@
             this.children = result;
         }
         return this;
+    };
+
+    CustomSourceNode.prototype.toStringWithSourceMap = function(options) {
+        function addMapping(source, marker, name) {
+            if (marker.line === previousLine && marker.column === previousColumn) {
+                return; // Avoid emitting duplicate mappings
+            }
+
+            map.addMapping({
+                source: sourceMap === true ? source || null : sourceMap,
+                original: {
+                    line: marker.line,
+                    column: marker.column
+                },
+                generated: {
+                    line: generatedLine,
+                    column: generatedColumn
+                },
+                name: name
+            });
+
+            previousLine = marker.line;
+            previousColumn = marker.column;
+        }
+
+        function visit(node) {
+            if (node.loc != null && node.loc.start != null) {
+                addMapping(node.loc.source, node.loc.start, node.name);
+            }
+            node.children.forEach(function (child) {
+                if (child instanceof CustomSourceNode) {
+                    visit(child);
+                    return;
+                }
+
+                code += child;
+                child.split('\n').forEach(function (line, i) {
+                    if (i > 0) {
+                        generatedLine++;
+                        generatedColumn = 0;
+                    }
+                    generatedColumn += line.length;
+                });
+            });
+            if (node.loc != null && node.loc.end != null) {
+                addMapping(node.loc.source, node.loc.end, node.name);
+            }
+        }
+
+        var map = new SourceMapGenerator(options);
+        var code = '';
+        var previousLine = 0;
+        var previousColumn = 0;
+        var generatedLine = 1;
+        var generatedColumn = 0;
+        visit(this);
+        return { code: code, map: map };
     };
 
     function hasLineTerminator(str) {
@@ -588,16 +648,13 @@
 
     function toSourceNode(generated, node) {
         if (node == null) {
-            if (generated instanceof SourceNode) {
+            if (generated instanceof CustomSourceNode) {
                 return generated;
             } else {
                 node = {};
             }
         }
-        if (node.loc == null) {
-            return new SourceNode(null, null, sourceMap, generated, node.name || null);
-        }
-        return new SourceNode(node.loc.start.line, node.loc.start.column, (sourceMap === true ? node.loc.source || null : sourceMap), generated, node.name || null);
+        return new CustomSourceNode(node.loc, generated, node.name || null);
     }
 
     function join(left, right) {
@@ -2004,12 +2061,12 @@
             if (!exports.browser) {
                 // We assume environment is node.js
                 // And prevent from including source-map by browserify
-                SourceNode = require('source-map').SourceNode;
+                SourceMapGenerator = require('source-map').SourceMapGenerator;
             } else {
-                SourceNode = global.sourceMap.SourceNode;
+                SourceMapGenerator = global.sourceMap.SourceMapGenerator;
             }
         } else {
-            SourceNode = SourceNodeMock;
+            SourceMapGenerator = null;
         }
 
         switch (node.type) {
